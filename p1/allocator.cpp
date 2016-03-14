@@ -94,10 +94,8 @@ void Allocator::realloc(Pointer &p, size_t N) {
 void Allocator::free(Pointer &p) {
     int idx = -1;
 
-    for (int i = 0; i < pointers.size(); ++i) {
-        auto curr_p = *pointers[i];
-        if (curr_p.get() == p.get() && curr_p.getSize() == p.getSize()) idx = i;
-    }
+    for (int i = 0; i < pointers.size(); ++i)
+        if (*pointers[i] == p) idx = i;
 
     if (idx == -1)
         throw AllocError(AllocErrorType::InvalidFree, "Invalid Free\n");
