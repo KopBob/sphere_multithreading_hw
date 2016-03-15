@@ -1,5 +1,10 @@
 #include "allocator.h"
 
+
+//////////////////////////////
+//    Pointer Class
+//////////////////////////////
+
 Pointer::Pointer() {
     ptr = shared_ptr<void *>(new void *(nullptr));
     size = shared_ptr<size_t>(new size_t(0));
@@ -10,17 +15,22 @@ Pointer::Pointer(void **p, size_t n) {
     size = shared_ptr<size_t>(new size_t(n));
 }
 
-Allocator::Allocator(void *base, size_t size) : base_ptr(base), size(size) {
-    is_occupied = std::vector<bool>(size, 0);
-    pointers = std::vector<Pointer *>();
-}
-
 bool Pointer::operator==(const Pointer &p) const {
     return (ptr == p.ptr && size == p.size) ? true : false;
 }
 
 bool Pointer::operator<(const Pointer &p) const {
     return *ptr < p.get();
+}
+
+
+//////////////////////////////
+//    Allocator Class
+//////////////////////////////
+
+Allocator::Allocator(void *base, size_t size) : base_ptr(base), size(size) {
+    is_occupied = std::vector<bool>(size, 0);
+    pointers = std::vector<Pointer *>();
 }
 
 Pointer Allocator::alloc(size_t N) {
