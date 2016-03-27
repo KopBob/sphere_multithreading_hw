@@ -11,6 +11,9 @@
 
 // Mac OS X
 
+#define MAX_BUF 5
+
+
 int set_nonblock(int fd) {
     int flags;
 
@@ -29,6 +32,8 @@ class Server {
     int port;
     int master_sock_fd;
 
+    const static char *welcome_msg;
+
     void mainLoop();
     void initMasterSock();
 public:
@@ -36,6 +41,9 @@ public:
     ~Server() { };
     void run();
 };
+
+
+const char *Server::welcome_msg = "Welcome\n";
 
 
 Server::Server(int _port)
@@ -98,14 +106,15 @@ void Server::mainLoop() {
 
                     clientsMap[slave_sock_fd] = "";
 
-                    send(slave_sock_fd, "Welcome\n", 8, SO_NOSIGPIPE);
+
+                    send(slave_sock_fd, welcome_msg, strlen(welcome_msg), SO_NOSIGPIPE);
 
                     fprintf(stdout, "LOG: accepted connection\n");
                     fflush(stdout);
 
                 } else {
-                    char buffer[5];
-                    int n = (int) read(eventlist[i].ident, buffer, 5);
+                    char buffer[MAX_BUF];
+                    int n = (int) read(eventlist[i].ident, buffer, MAX_BUF);
                     buffer[n] = '\0';
 
                     if (n <= 0) {
