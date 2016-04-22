@@ -91,6 +91,7 @@ buffered_on_event_cb(struct bufferevent *bev, short events, void *arg) {
     }
 
     bufferevent_free(bev);
+    bufferevent_free((struct bufferevent *)arg);
 }
 
 
