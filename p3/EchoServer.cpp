@@ -9,7 +9,6 @@
 
 #include <event2/bufferevent.h>
 #include <event2/listener.h>
-#include <evdns.h>
 
 #include "ProxyConfig.h"
 

@@ -1,13 +1,12 @@
 #include "ProxyServer.h"
 
-#include <cstdlib>
-#include <system_error>
-
+#include <err.h>
+#include <iostream>
 #include <csignal>
 
 #include <event2/listener.h>
-#include <iostream>
-#include <err.h>
+#include <event2/bufferevent.h>
+#include <event2/bufferevent_compat.h>
 
 
 ProxyServer::ProxyServer(ProxyConfig _config) {
@@ -91,7 +90,7 @@ buffered_on_event_cb(struct bufferevent *bev, short events, void *arg) {
     }
 
     bufferevent_free(bev);
-    bufferevent_free((struct bufferevent *)arg);
+    bufferevent_free((struct bufferevent *) arg);
 }
 
 

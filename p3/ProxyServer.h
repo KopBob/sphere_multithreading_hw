@@ -5,7 +5,6 @@
 #ifndef P3_PROXYSERVER_H
 #define P3_PROXYSERVER_H
 
-#include <evdns.h>
 #include "event2/event.h"
 
 #include "ProxyConfig.h"
