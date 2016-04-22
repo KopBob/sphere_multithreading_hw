@@ -10,6 +10,7 @@
 #include <event2/event_compat.h>
 #include <event2/bufferevent.h>
 
+#include "ProxyConfig.h"
 
 int set_nonblock(int fd) {
     int flags;
@@ -42,12 +43,9 @@ int accept_sock(struct sockaddr_in sa) {
 }
 
 
-
-
-
 struct accept_info {
     struct event_base *base;
-    std::vector<int> *servers_sockets_fds;
+    std::vector<sockaddr_in> *servers_sockaddrs;
 };
 
 struct proxy_info {
@@ -80,12 +78,23 @@ void event_callback(struct bufferevent *bev, short events, void *ptr) {
     }
 }
 
-void accept_callback(evutil_socket_t fd, short ev, void *ctx) {
+void accept_callback(evutil_socket_t fd, short ev, void *arg) {
+    int res;
 
-    struct accept_info *info = (struct accept_info *) ctx;
+    struct accept_info *ctx = (struct accept_info *) arg;
 
-    int random_server_fd_idx = rand() % (int) ((*info->servers_sockets_fds).size() - 0 + 1);
-    int server_fd = (*info->servers_sockets_fds)[random_server_fd_idx];
+    int random_server_idx = rand() % (int) ((*ctx->servers_sockaddrs).size() - 0 + 1);
+    sockaddr_in server_sockaddr_in = (*ctx->servers_sockaddrs)[random_server_idx];
+
+    int server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+//    set_nonblock(server_fd); // Non block socket
+
+    int optval = 1; // Reusable descriptor if we kill app
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+
+    res = connect(server_fd, (struct sockaddr *) &server_sockaddr_in, sizeof(struct sockaddr_in));
+    if (res)
+        throw std::system_error(errno, std::system_category());
 
     int slave_fd = accept(fd, 0, 0);
     if (slave_fd == -1)
@@ -95,13 +104,12 @@ void accept_callback(evutil_socket_t fd, short ev, void *ctx) {
 
     struct bufferevent *client_bev;
     struct bufferevent *server_bev;
-    struct event_base *base = (struct event_base *) ctx;
 
     struct proxy_info *client_info;
     struct proxy_info *server_info;
 
-    client_bev = bufferevent_socket_new(base, slave_fd, BEV_OPT_CLOSE_ON_FREE);
-    server_bev = bufferevent_socket_new(base, server_fd, BEV_OPT_CLOSE_ON_FREE);
+    client_bev = bufferevent_socket_new(ctx->base, slave_fd, BEV_OPT_CLOSE_ON_FREE);
+    server_bev = bufferevent_socket_new(ctx->base, server_fd, BEV_OPT_CLOSE_ON_FREE);
 
     // Client
     client_info = (struct proxy_info *) malloc(sizeof(struct proxy_info));
@@ -122,50 +130,48 @@ void accept_callback(evutil_socket_t fd, short ev, void *ctx) {
 
 class Proxy {
     int master_sock_fd;
-    std::vector<int> *servers_sockets_fds;
+    std::vector<sockaddr_in> *servers_sockaddrs;
 
 public:
     Proxy();
+
     ~Proxy();
 
     void init(ProxyConfig config);
 };
 
 void Proxy::init(ProxyConfig config) {
-    int res;
+    int ret;
 
     struct event *accept_event;
     struct event_base *base = event_base_new();
 
     master_sock_fd = accept_sock(config.master_sockaddr);
-    for (sockaddr_in &sockaddr : config.servers_sockaddrs) // access by const reference
-        servers_sockets_fds->push_back(accept_sock(sockaddr));
+    servers_sockaddrs = &config.servers_sockaddrs;
 
-    res = listen(master_sock_fd, SOMAXCONN);
-    if (res == -1)
+    ret = listen(master_sock_fd, SOMAXCONN);
+    if (ret == -1)
         throw std::system_error(errno, std::system_category());
 
-//    base = event_base_new();
     if (!base)
         throw std::system_error(errno, std::system_category());
 
     struct accept_info *info;
     info = (struct accept_info *) malloc(sizeof(struct accept_info));
     info->base = base;
-    info->servers_sockets_fds = servers_sockets_fds;
-
-//    struct event ev_accept;
-//    event_set(&ev_accept, master_sock_fd, EV_READ | EV_PERSIST, accept_callback, NULL);
-//    event_add(&ev_accept, NULL);
-//    event_dispatch();
+    info->servers_sockaddrs = servers_sockaddrs;
 
     accept_event = event_new(base, master_sock_fd, EV_READ | EV_PERSIST, accept_callback, info);
     event_add(accept_event, NULL);
-    event_dispatch();
+
+    /* run event loop */
+    ret = event_base_dispatch(base);
+    if (ret == -1)
+        throw std::system_error(errno, std::system_category());
 }
 
 Proxy::Proxy() {
-    servers_sockets_fds = new std::vector<int>();
+    servers_sockaddrs = new std::vector<sockaddr_in>();
 }
 
 Proxy::~Proxy() {
@@ -175,7 +181,7 @@ Proxy::~Proxy() {
 
 int main(int argc, char const *argv[]) {
     ProxyConfig proxy_config;
-    proxy_config.parse(argv[1]);
+    proxy_config.from_config_file(argv[1]);
 
     Proxy proxy;
     proxy.init(proxy_config);
