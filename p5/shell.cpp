@@ -6,6 +6,7 @@
 #include <iostream>
 #include <fstream>
 #include <fcntl.h>
+#include <signal.h>
 
 #define MAX_BUF 1024
 
@@ -227,13 +228,11 @@ execute_pipe(std::vector<Command *> execution_pipe) {
     int wstatus;
     pid_t pid, w;
 
-    int master_pfd[2];
     int pfd[execution_pipe.size() - 1][2];
 
     /*
      * pipe initialization
      */
-    pipe(master_pfd);
     for (int l = 0; l < execution_pipe.size(); ++l)
         pipe(pfd[l]);
 
@@ -254,11 +253,11 @@ execute_pipe(std::vector<Command *> execution_pipe) {
     for (int i = 0; i < execution_pipe.size(); ++i) {
         auto cmd = execution_pipe[i];
 
-        if ((pid = fork()) == 0) {
+        pid = fork();
+        if (pid == 0) {
             if (i == execution_pipe.size() - 1) { // last cmd in pipe
                 if (i - 1 >= 0)
                     dup2(pfd[i - 1][0], STDIN_FILENO);
-                dup2(master_pfd[1], STDOUT_FILENO);
             } else if (i == 0) { // first cmd in pipe
                 dup2(pfd[i][1], STDOUT_FILENO);
             } else { // intermediate cmd in pipe
@@ -276,8 +275,6 @@ execute_pipe(std::vector<Command *> execution_pipe) {
                 close(pfd[l][0]);
                 close(pfd[l][1]);
             }
-            close(master_pfd[0]);
-            close(master_pfd[1]);
 
             execvp(execution_pipe[i]->argv[0].c_str(), execution_pipe[i]->get_argv_as_c_array());
             perror("execl");
@@ -300,9 +297,6 @@ execute_pipe(std::vector<Command *> execution_pipe) {
             close(pfd[l][0]);
             close(pfd[l][1]);
         }
-        close(master_pfd[1]);
-        std::cout << read_from_pipe(master_pfd[0]);
-        close(master_pfd[0]);
 
         do {
             w = waitpid(pid, &wstatus, WUNTRACED | WCONTINUED);
@@ -310,9 +304,8 @@ execute_pipe(std::vector<Command *> execution_pipe) {
                 perror("waitpid");
                 exit(EXIT_FAILURE);
             }
-
-//            check_status(wstatus);
         } while (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus));
+
         return WEXITSTATUS(wstatus);
     }
 }
@@ -372,24 +365,41 @@ void sig_handler(int signo) {
 
 
 void
-run_pipeline(std::vector<std::tuple<std::vector<Command *>, Operator>> pipeline, bool is_in_bg) {
+run_pipeline(std::vector<std::tuple<std::vector<Command *>, Operator>> &pipeline, bool is_in_bg) {
     int prev_status = 0;
 
-    for (int i = 0; i < pipeline.size(); ++i) {
-        std::vector<Command *> execution_pipe = std::get<0>(pipeline[i]);
-        Operator curr_operator = std::get<1>(pipeline[i]);
+    if (!is_in_bg) {
+        for (int i = 0; i < pipeline.size(); ++i) {
+            std::vector<Command *> execution_pipe = std::get<0>(pipeline[i]);
+            Operator curr_operator = std::get<1>(pipeline[i]);
 
-        prev_status = execute(prev_status, execution_pipe, curr_operator);
+            prev_status = execute(prev_status, execution_pipe, curr_operator);
+        }
+    } else {
+        pid_t pid;
+        switch (pid = fork()) {
+            case -1:
+                perror("fork");
+                exit(EXIT_FAILURE);
+            case 0:
+                for (int i = 0; i < pipeline.size(); ++i) {
+                    std::vector<Command *> execution_pipe = std::get<0>(pipeline[i]);
+                    Operator curr_operator = std::get<1>(pipeline[i]);
+
+                    prev_status = execute(prev_status, execution_pipe, curr_operator);
+                }
+                _exit(EXIT_SUCCESS);
+            default:
+                break;
+        }
     }
 }
 
 
-int main() {
-//    signal(SIGINT, sig_handler);
-//    sleep(10);
 
-    int in = open("/Users/kopbob/dev/sphere/multithreading/sfera-mail-mt/practice/4-shell/tests/5.sh", O_RDONLY);
-//    dup2(in, STDIN_FILENO);
+int main() {
+    int in = open("/Users/kopbob/dev/sphere/multithreading/sfera-mail-mt/practice/4-shell/tests/6.sh", O_RDONLY);
+    dup2(in, STDIN_FILENO);
 
     while (check_eof() == STATUS_SUCCESS) {
         std::vector<std::tuple<std::vector<Command *>, Operator>> pipeline;
