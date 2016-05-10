@@ -5,7 +5,6 @@
 #include <unistd.h>
 #include <iostream>
 #include <fstream>
-#include <stdio.h>
 #include <fcntl.h>
 
 #define MAX_BUF 1024
@@ -31,7 +30,8 @@ typedef enum {
     OR,
     PIPE,
     END,
-    EXIT
+    EXIT,
+    BG
 } Operator;
 
 typedef enum {
@@ -98,9 +98,9 @@ next_token() {
 
     std::string token;
     while ((c = getchar()) != EOF and (c != '\n') \
-                and (c != ' ' or is_in_quote) \
-                and (c != '<') and (c != '>') \
-                and (c != '&') and (c != '|')) {
+ and (c != ' ' or is_in_quote) \
+ and (c != '<') and (c != '>') \
+ and (c != '&') and (c != '|')) {
         if (c == '"') {
             is_in_quote = !is_in_quote;
             continue;
@@ -159,6 +159,8 @@ int is_operator(const char *token) {
         return PIPE;
     } else if (strcmp(token, END_OPERATOR) == 0) {
         return END;
+    } else if (strcmp(token, BG_OPERATOR) == 0) {
+        return BG;
     }
 
     return -1;
@@ -338,11 +340,14 @@ execute(int prev_status, std::vector<Command *> execution_pipe, Operator op) {
  * misc
  */
 
-void clean_execution_pipe(std::vector<Command *> &execution_pipe) {
-    for (Command *cmd : execution_pipe) {
-        delete cmd;
+void clean_pipeline(std::vector<std::tuple<std::vector<Command *>, Operator>> &pipeline) {
+    for (int i = 0; i < pipeline.size(); ++i) {
+        for (Command *cmd : std::get<0>(pipeline[i])) {
+//            std::cout << cmd->argv[0] << std::endl;
+            delete cmd;
+        }
     }
-    execution_pipe.clear();
+    pipeline.clear();
 }
 
 
@@ -358,42 +363,62 @@ check_eof() {
     return STATUS_SUCCESS;
 }
 
-void sig_handler(int signo)
-{
+void sig_handler(int signo) {
     if (signo == SIGINT)
         printf("received SIGINT\n");
 
     // kill (pid_t pid, int signum)
 }
 
+
+void
+run_pipeline(std::vector<std::tuple<std::vector<Command *>, Operator>> pipeline, bool is_in_bg) {
+    int prev_status = 0;
+
+    for (int i = 0; i < pipeline.size(); ++i) {
+        std::vector<Command *> execution_pipe = std::get<0>(pipeline[i]);
+        Operator curr_operator = std::get<1>(pipeline[i]);
+
+        prev_status = execute(prev_status, execution_pipe, curr_operator);
+    }
+}
+
+
 int main() {
 //    signal(SIGINT, sig_handler);
 //    sleep(10);
 
-//    std::vector<std::tuple<Command*, Operator>> pipeline;
-
     int in = open("/Users/kopbob/dev/sphere/multithreading/sfera-mail-mt/practice/4-shell/tests/5.sh", O_RDONLY);
-    dup2(in, STDIN_FILENO);
+//    dup2(in, STDIN_FILENO);
 
-    while(check_eof() == STATUS_SUCCESS) {
+    while (check_eof() == STATUS_SUCCESS) {
+        std::vector<std::tuple<std::vector<Command *>, Operator>> pipeline;
+
         std::vector<Command *> execution_pipe;
-        Operator op = EMP, next_op = EMP;
-        int prev_status;
+        Operator curr_op = EMP, prev_op = EMP;
 
-        while (op != END) {
+        while (curr_op != END and curr_op != BG) {
             Command *cmd = NULL;
-            read_next(cmd, op);
+            read_next(cmd, curr_op);
 
             execution_pipe.push_back(cmd);
 
-            if (op == PIPE)
+            if (curr_op == PIPE)
                 continue;
 
-            prev_status = execute(prev_status, execution_pipe, next_op);
-            next_op = op;
+            pipeline.push_back(std::make_tuple(execution_pipe, prev_op));
+            prev_op = curr_op;
 
-            clean_execution_pipe(execution_pipe);
+            execution_pipe.clear();
         }
+
+        if (curr_op == BG) {
+            run_pipeline(pipeline, true);
+        } else {
+            run_pipeline(pipeline, false);
+        }
+
+        clean_pipeline(pipeline);
     }
 
     close(in);
