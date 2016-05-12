@@ -1,0 +1,2 @@
+trap echo sigint ; exit INT
+done

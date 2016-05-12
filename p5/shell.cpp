@@ -19,7 +19,9 @@
 #define OR_OPERATOR   "||"
 #define PIPE_OPERATOR "|"
 #define END_OPERATOR "\n"
+#define SEMI_OPERATOR ";"
 #define EOF_OPERATOR "EXIT"
+
 
 #define IN_REDIRECT   "<"
 #define OUT_REDIRECT  ">"
@@ -101,8 +103,8 @@ next_token() {
     while ((c = getchar()) != EOF and (c != '\n') \
  and (c != ' ' or is_in_quote) \
  and (c != '<') and (c != '>') \
- and (c != '&') and (c != '|')) {
-        if (c == '"') {
+ and (c != '&') and (c != '|') and (c != ';' or is_in_quote)) {
+        if ((c == '"') or (c == '\'')) {
             is_in_quote = !is_in_quote;
             continue;
         }
@@ -123,8 +125,10 @@ next_token() {
             return PIPE_OPERATOR;
         }
         if (c == '\n') return END_OPERATOR;
+        if (c == ';') return AND_OPERATOR;
         if (c == '>') return OUT_REDIRECT;
         if (c == '<') return IN_REDIRECT;
+
     }
 
     ungetc(c, stdin);
@@ -305,6 +309,7 @@ execute_pipe(std::vector<Command *> execution_pipe) {
                 exit(EXIT_FAILURE);
             }
         } while (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus));
+//        std::cerr << "   Process " << pid <<  " exited: " << WEXITSTATUS(wstatus) << std::endl;
 
         return WEXITSTATUS(wstatus);
     }
@@ -356,50 +361,85 @@ check_eof() {
     return STATUS_SUCCESS;
 }
 
-void sig_handler(int signo) {
-    if (signo == SIGINT)
-        printf("received SIGINT\n");
 
-    // kill (pid_t pid, int signum)
+
+int curr_pid;
+
+void handle_sigint(int signo) {
+    if (signo == SIGINT) {
+        if (curr_pid) {
+            kill(curr_pid, SIGINT);
+            curr_pid = 0;
+        } else {
+            exit(EXIT_FAILURE);
+        }
+    }
 }
 
+void delete_zombies(int sig)
+{
+    pid_t kidpid;
+    int status;
+
+    printf("Inside zombie deleter:  ");
+    while ((kidpid = waitpid(-1, &status, WNOHANG)) > 0)
+    {
+        printf("Child %ld terminated\n", kidpid);
+    }
+}
+
+void handle_sigchld(int sig) {
+    int wstatus;
+    pid_t w;
+    do {
+        w = waitpid((pid_t)(-1), &wstatus, 0);
+        if (w == -1) {
+            perror("waitpid");
+            exit(EXIT_FAILURE);
+        }
+    } while (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus));
+    std::cerr << "Process " << w <<  " exited: " << WEXITSTATUS(wstatus) << std::endl;
+//
+//    int saved_errno = errno;
+//    while (waitpid((pid_t)(-1), 0, WNOHANG) > 0) {}
+//    errno = saved_errno;
+}
 
 void
 run_pipeline(std::vector<std::tuple<std::vector<Command *>, Operator>> &pipeline, bool is_in_bg) {
     int prev_status = 0;
 
-    if (!is_in_bg) {
-        for (int i = 0; i < pipeline.size(); ++i) {
-            std::vector<Command *> execution_pipe = std::get<0>(pipeline[i]);
-            Operator curr_operator = std::get<1>(pipeline[i]);
+    pid_t pid, w;
+    int wstatus;
 
-            prev_status = execute(prev_status, execution_pipe, curr_operator);
-        }
-    } else {
-        pid_t pid;
-        switch (pid = fork()) {
-            case -1:
-                perror("fork");
-                exit(EXIT_FAILURE);
-            case 0:
-                for (int i = 0; i < pipeline.size(); ++i) {
-                    std::vector<Command *> execution_pipe = std::get<0>(pipeline[i]);
-                    Operator curr_operator = std::get<1>(pipeline[i]);
+    switch (pid = fork()) {
+        case -1:
+            perror("fork");
+            exit(EXIT_FAILURE);
+        case 0:
+            for (int i = 0; i < pipeline.size(); ++i) {
+                std::vector<Command *> execution_pipe = std::get<0>(pipeline[i]);
+                Operator curr_operator = std::get<1>(pipeline[i]);
 
-                    prev_status = execute(prev_status, execution_pipe, curr_operator);
-                }
-                _exit(EXIT_SUCCESS);
-            default:
-                break;
-        }
+                prev_status = execute(prev_status, execution_pipe, curr_operator);
+            }
+            _exit(EXIT_SUCCESS);
+        default:
+            if (!is_in_bg) {
+                curr_pid = pid;
+                wait4(pid, &wstatus, 0, NULL);
+                std::cerr << "Process " << pid <<  " exited: " << WEXITSTATUS(wstatus) << std::endl;
+            }
     }
+
 }
 
 
-
 int main() {
-    int in = open("/Users/kopbob/dev/sphere/multithreading/sfera-mail-mt/practice/4-shell/tests/6.sh", O_RDONLY);
-    dup2(in, STDIN_FILENO);
+    signal(SIGINT, handle_sigint);
+//    signal(SIGCHLD, delete_zombies);
+//    int in = open("/Users/kopbob/dev/sphere/multithreading/sfera-mail-mt/practice/4-shell/tests/6.sh", O_RDONLY);
+//    dup2(in, STDIN_FILENO);
 
     while (check_eof() == STATUS_SUCCESS) {
         std::vector<std::tuple<std::vector<Command *>, Operator>> pipeline;
@@ -431,5 +471,5 @@ int main() {
         clean_pipeline(pipeline);
     }
 
-    close(in);
+//    close(in);
 }
